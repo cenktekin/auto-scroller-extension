@@ -37,6 +37,8 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       // ms
       __publicField(this, "lastTimestamp", null);
       __publicField(this, "subpixelRemainder", 0);
+      __publicField(this, "isReadingMode", false);
+      __publicField(this, "readingModeStyleEl", null);
       __publicField(this, "scrollStep", (timestamp) => {
         if (!this.settings.isScrolling) return;
         const dt = this.lastTimestamp === null ? 1 / 60 : Math.max(0, (timestamp - this.lastTimestamp) / 1e3);
@@ -67,12 +69,39 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       this.storageAvailable = !!(typeof chrome !== "undefined" && chrome.storage && chrome.storage.local);
       this.init();
     }
+    setupSpeedHotkeys() {
+      try {
+        window.addEventListener("keydown", (e) => {
+          try {
+            const target = e.target;
+            const isEditable = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+            if (isEditable) return;
+            const inc = e.key === "+" || e.key === "=" || e.code === "NumpadAdd";
+            const dec = e.key === "-" || e.key === "_" || e.code === "NumpadSubtract";
+            if (!inc && !dec) return;
+            e.preventDefault();
+            const clamp = (v) => Math.max(0, Math.min(10, v));
+            const next = clamp(this.settings.scrollSpeed + (inc ? 1 : -1));
+            if (next === this.settings.scrollSpeed) return;
+            this.updateSettings({ scrollSpeed: next });
+            if (this.storageAvailable) {
+              chrome.storage.local.set({ readerSettings: { ...this.settings, scrollSpeed: next } });
+            }
+          } catch (error) {
+            handleChromeError("handling speed hotkeys", error);
+          }
+        }, { capture: true });
+      } catch (error) {
+        handleChromeError("setting up speed hotkeys", error);
+      }
+    }
     async init() {
       await this.loadSettings();
       console.log("After loadSettings, isScrolling is:", this.settings.isScrolling);
       this.createFocusLine();
       this.setupMessageListener();
       this.setupStorageListener();
+      this.setupSpeedHotkeys();
       console.log("AutoScroll Reader content script loaded.");
       if (this.settings.isScrolling) {
         this.startScrolling();
@@ -109,6 +138,142 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
         }
       });
     }
+    enableReadingMode() {
+      try {
+        if (this.isReadingMode) return;
+        document.documentElement.setAttribute("data-autoscroll-reading-mode", "on");
+        const aggressiveCSS = `
+          html[data-autoscroll-reading-mode='on'] body {
+            background: #111827 !important;
+            color: #e5e7eb !important;
+            line-height: 1.7 !important;
+            font-size: 18px !important;
+            visibility: visible !important;
+            display: block !important;
+            overflow-y: auto !important;
+          }
+          html[data-autoscroll-reading-mode='on'] html {
+            visibility: visible !important;
+            display: block !important;
+          }
+          html[data-autoscroll-reading-mode='on'] img, 
+          html[data-autoscroll-reading-mode='on'] figure, 
+          html[data-autoscroll-reading-mode='on'] video { 
+            max-width: 100%; height: auto; display: block; margin: 1rem auto; 
+          }
+          /* Center main content and limit width */
+          html[data-autoscroll-reading-mode='on'] main, 
+          html[data-autoscroll-reading-mode='on'] article, 
+          html[data-autoscroll-reading-mode='on'] .content, 
+          html[data-autoscroll-reading-mode='on'] .post, 
+          html[data-autoscroll-reading-mode='on'] [role='main'] {
+            max-width: 800px; margin: 0 auto; padding: 0 16px; 
+          }
+          /* Hide common clutter but avoid removing structural layout */
+          html[data-autoscroll-reading-mode='on'] [class*='sidebar' i],
+          html[data-autoscroll-reading-mode='on'] [class*='ad' i],
+          html[data-autoscroll-reading-mode='on'] .ads,
+          html[data-autoscroll-reading-mode='on'] .advertisement,
+          html[data-autoscroll-reading-mode='on'] [id*='cookie' i],
+          html[data-autoscroll-reading-mode='on'] [aria-label*='cookie' i],
+          /* Hide common overlays/popups instead of all fixed-position elements */
+          html[data-autoscroll-reading-mode='on'] [aria-modal='true'],
+          html[data-autoscroll-reading-mode='on'] [role='dialog'],
+          html[data-autoscroll-reading-mode='on'] [class*='modal' i],
+          html[data-autoscroll-reading-mode='on'] [class*='overlay' i],
+          html[data-autoscroll-reading-mode='on'] [class*='popup' i],
+          html[data-autoscroll-reading-mode='on'] [class*='banner' i][style*='position:fixed' i] {
+            display: none !important;
+          }
+          /* Keep focus line above everything; JS controls visibility */
+          html[data-autoscroll-reading-mode='on'] #autoscroll-focus-line {
+            display: block !important;
+            pointer-events: none !important;
+            z-index: 2147483647 !important;
+          }
+        `;
+        const safeCSS = `
+          html[data-autoscroll-reading-mode='on'] body {
+            background: #111827 !important;
+            color: #e5e7eb !important;
+            line-height: 1.7 !important;
+            font-size: 18px !important;
+            visibility: visible !important;
+            display: block !important;
+            overflow-y: auto !important;
+          }
+          html[data-autoscroll-reading-mode='on'] html { visibility: visible !important; display: block !important; }
+          /* Center main content and limit width */
+          html[data-autoscroll-reading-mode='on'] main, 
+          html[data-autoscroll-reading-mode='on'] article, 
+          html[data-autoscroll-reading-mode='on'] .content, 
+          html[data-autoscroll-reading-mode='on'] .post, 
+          html[data-autoscroll-reading-mode='on'] [role='main'] {
+            max-width: 800px; margin: 0 auto; padding: 0 16px; 
+          }
+          /* Keep everything else, just ensure focus line on top; JS controls visibility */
+          html[data-autoscroll-reading-mode='on'] #autoscroll-focus-line {
+            display: block !important;
+            pointer-events: none !important;
+            z-index: 2147483647 !important;
+          }
+        `;
+        this.readingModeStyleEl = document.createElement("style");
+        this.readingModeStyleEl.id = "autoscroll-reading-style";
+        const host = location.hostname;
+        const useSafeFirst = /(^|\.)halktv\.com\.tr$/i.test(host);
+        this.readingModeStyleEl.textContent = useSafeFirst ? safeCSS : aggressiveCSS;
+        document.head.appendChild(this.readingModeStyleEl);
+        const baseline = document.documentElement.scrollHeight;
+        let switched = false;
+        const maybeSwitch = () => {
+          if (switched) return;
+          try {
+            const nowH = document.documentElement.scrollHeight;
+            if (!useSafeFirst && nowH > 0 && baseline > 0 && nowH / baseline < 0.6) {
+              this.readingModeStyleEl.textContent = safeCSS;
+              switched = true;
+              cleanup();
+            }
+          } catch {
+          }
+        };
+        const scrollHandler = () => maybeSwitch();
+        const mo = new MutationObserver(() => maybeSwitch());
+        const cleanup = () => {
+          window.removeEventListener("scroll", scrollHandler, true);
+          try {
+            mo.disconnect();
+          } catch {
+          }
+        };
+        window.addEventListener("scroll", scrollHandler, true);
+        try {
+          mo.observe(document.documentElement, { childList: true, subtree: true, attributes: false });
+        } catch {
+        }
+        setTimeout(maybeSwitch, 0);
+        this.isReadingMode = true;
+      } catch (error) {
+        handleChromeError("enabling reading mode", error);
+      }
+    }
+    disableReadingMode() {
+      try {
+        document.documentElement.removeAttribute("data-autoscroll-reading-mode");
+        if (this.readingModeStyleEl) {
+          this.readingModeStyleEl.remove();
+          this.readingModeStyleEl = null;
+        }
+        this.isReadingMode = false;
+      } catch (error) {
+        handleChromeError("disabling reading mode", error);
+      }
+    }
+    toggleReadingMode() {
+      if (this.isReadingMode) this.disableReadingMode();
+      else this.enableReadingMode();
+    }
     setupMessageListener() {
       try {
         chrome.runtime.onMessage.addListener(
@@ -127,6 +292,10 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
                   break;
                 case "GET_STATUS":
                   sendResponse({ isScrolling: this.settings.isScrolling });
+                  break;
+                case "TOGGLE_READING_MODE":
+                  this.toggleReadingMode();
+                  sendResponse({ readingMode: this.isReadingMode });
                   break;
                 default:
                   console.warn("AutoScroll Reader: Unknown message type received:", message.type);

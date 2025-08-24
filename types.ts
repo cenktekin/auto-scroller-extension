@@ -16,6 +16,6 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
 };
 
 export interface ChromeMessage {
-  type: 'TOGGLE_SCROLL' | 'UPDATE_SETTINGS' | 'GET_STATUS';
+  type: 'TOGGLE_SCROLL' | 'UPDATE_SETTINGS' | 'GET_STATUS' | 'TOGGLE_READING_MODE';
   payload?: Partial<ReaderSettings>;
 }

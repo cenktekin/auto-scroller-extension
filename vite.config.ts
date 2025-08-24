@@ -35,6 +35,7 @@ export default defineConfig({
         popup: resolve(__dirname, 'index.html'),
         background: resolve(__dirname, 'background.ts'),
         content: resolve(__dirname, 'content.ts'),
+        pdfviewer: resolve(__dirname, 'pdf-viewer.html'),
       },
       output: {
         entryFileNames: '[name].js',

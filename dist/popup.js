@@ -1,40 +1,4 @@
-(function polyfill() {
-  const relList = document.createElement("link").relList;
-  if (relList && relList.supports && relList.supports("modulepreload")) {
-    return;
-  }
-  for (const link of document.querySelectorAll('link[rel="modulepreload"]')) {
-    processPreload(link);
-  }
-  new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      if (mutation.type !== "childList") {
-        continue;
-      }
-      for (const node of mutation.addedNodes) {
-        if (node.tagName === "LINK" && node.rel === "modulepreload")
-          processPreload(node);
-      }
-    }
-  }).observe(document, { childList: true, subtree: true });
-  function getFetchOpts(link) {
-    const fetchOpts = {};
-    if (link.integrity) fetchOpts.integrity = link.integrity;
-    if (link.referrerPolicy) fetchOpts.referrerPolicy = link.referrerPolicy;
-    if (link.crossOrigin === "use-credentials")
-      fetchOpts.credentials = "include";
-    else if (link.crossOrigin === "anonymous") fetchOpts.credentials = "omit";
-    else fetchOpts.credentials = "same-origin";
-    return fetchOpts;
-  }
-  function processPreload(link) {
-    if (link.ep)
-      return;
-    link.ep = true;
-    const fetchOpts = getFetchOpts(link);
-    fetch(link.href, fetchOpts);
-  }
-})();
+import "./assets/index.js";
 function getDefaultExportFromCjs(x2) {
   return x2 && x2.__esModule && Object.prototype.hasOwnProperty.call(x2, "default") ? x2["default"] : x2;
 }
@@ -7179,6 +7143,18 @@ const App = () => {
     console.log("handleToggleScrolling called. Count:", toggleCountRef.current);
     sendMessageToContentScript({ type: "TOGGLE_SCROLL" });
   };
+  const handleOpenPdfViewer = () => {
+    try {
+      if (typeof chrome === "undefined" || !chrome.runtime || !chrome.tabs) {
+        console.warn("Chrome APIs not available to open PDF viewer.");
+        return;
+      }
+      const url = chrome.runtime.getURL("pdf-viewer.html");
+      chrome.tabs.create({ url });
+    } catch (err) {
+      console.error("Failed to open PDF viewer:", err);
+    }
+  };
   const handleSettingChange = (update) => {
     updateSettings(update);
     sendMessageToContentScript({ type: "UPDATE_SETTINGS", payload: update });
@@ -7236,7 +7212,7 @@ const App = () => {
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("footer", { className: "pt-3 border-t border-gray-700", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("footer", { className: "pt-3 border-t border-gray-700 space-y-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
@@ -7248,17 +7224,61 @@ const App = () => {
           children: settings.isScrolling ? "Stop Scrolling" : "Start Scrolling"
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-center text-gray-400 mt-2", children: "Use Ctrl+Shift+S to toggle" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] text-center mt-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "a",
-        {
-          href: "https://buymeacoffee.com/cenktekin",
-          target: "_blank",
-          rel: "noopener noreferrer",
-          className: "text-amber-400 hover:text-amber-300 underline",
-          children: "Buy me a coffee ☕"
-        }
-      ) })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-center text-gray-400", children: "Shortcut: Ctrl+Shift+S" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: handleOpenPdfViewer,
+            className: "w-full py-2 text-sm font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors",
+            style: { width: "48%" },
+            children: "Open PDF Viewer"
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: () => {
+              console.log("Reading Mode toggle from popup");
+              sendMessageToContentScript({ type: "TOGGLE_READING_MODE" });
+            },
+            className: "py-2 text-sm font-medium rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-100 transition-colors",
+            style: { width: "48%" },
+            children: "Reading Mode"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-center text-gray-400", children: "Reading Mode shortcut: Ctrl+Shift+R" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "a",
+          {
+            href: "https://github.com/cenktekin",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            className: "flex items-center justify-center rounded-lg ring-1 ring-gray-600 ring-offset-2 ring-offset-gray-800 text-gray-100 hover:text-white transition-all",
+            style: { width: "20%", height: "40px" },
+            title: "GitHub Repository",
+            children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "20", height: "20", viewBox: "0 0 24 24", fill: "currentColor", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fillRule: "evenodd", d: "M12 2C6.477 2 2 6.484 2 12.016c0 4.427 2.865 8.184 6.839 9.504.5.092.682-.217.682-.483 0-.237-.009-.866-.014-1.699-2.782.604-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.907-.62.069-.607.069-.607 1.003.071 1.53 1.03 1.53 1.03.892 1.53 2.341 1.088 2.91.833.091-.647.35-1.088.636-1.339-2.221-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.989 1.029-2.689-.103-.253-.446-1.272.098-2.65 0 0 .84-.269 2.75 1.027A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.505.337 1.908-1.296 2.747-1.027 2.747-1.027.546 1.378.203 2.397.1 2.65.641.7 1.028 1.596 1.028 2.689 0 3.848-2.338 4.695-4.566 4.944.359.31.678.921.678 1.856 0 1.339-.012 2.419-.012 2.749 0 .268.18.58.688.481A10.022 10.022 0 0 0 22 12.016C22 6.484 17.523 2 12 2Z", clipRule: "evenodd" }) })
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "a",
+          {
+            href: "https://buymeacoffee.com/cenktekin",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            className: "flex-1 ml-2 py-2 text-sm font-semibold rounded-lg transition-all no-underline",
+            style: {
+              background: "#F59E0B",
+              color: "#111827",
+              textDecoration: "none",
+              boxShadow: "0 6px 14px rgba(245, 158, 11, 0.35)"
+            },
+            children: "Buy me a coffee ☕"
+          }
+        )
+      ] })
     ] })
   ] });
 };

@@ -2,20 +2,54 @@
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%E2%98%95%EF%B8%8F-orange)](https://buymeacoffee.com/cenktekin)
 
-AutoScroll Reader automatically scrolls pages with a visible focus line for comfortable reading.
+AutoScroll Reader adds smooth auto-scrolling with a subtle focus line for comfortable reading on the web and inside the built-in PDF viewer page of this extension.
 
-Works on normal web pages and embedded PDF viewers. Chrome's built‑in PDF viewer is not scriptable; see Known Limitations for a workaround plan.
+## Highlights
 
-## Features
+- Smooth, time-based auto-scroll with sub-pixel accumulation (works at very low speeds)
+- Customizable focus line: color, opacity, thickness
+- Settings persist via Chrome storage
+- Internal PDF Viewer powered by `pdfjs-dist`
 
-- Adjustable scroll speed (time‑based, smooth, sub‑pixel accurate)
-- Toggle start/stop via popup or keyboard shortcut
-- Customizable focus line (color, opacity, thickness)
-- State persisted per browser (Chrome storage)
+## Demos
 
-## Keyboard Shortcut
+<div align="left">
 
-- Default: Ctrl+Shift+S (Cmd+Shift+S on macOS)
+<p><strong>Reading Mode on Web Pages</strong></p>
+
+<video src="./auto-scroll-reading.mp4" width="520" autoplay muted loop playsinline controls>
+  <a href="./auto-scroll-reading.mp4">Watch the demo video</a>
+</video>
+
+<p><strong>PDF Auto-Scroll</strong></p>
+
+<video src="./auto-scroll-pdf.mp4" width="520" autoplay muted loop playsinline controls>
+  <a href="./auto-scroll-pdf.mp4">Watch the demo video</a>
+  (Your Markdown viewer may not support inline video playback.)
+  
+</video>
+
+</div>
+
+## Keyboard Shortcuts
+
+- Web pages:
+  - Toggle auto-scroll: Ctrl+Shift+S (Cmd+Shift+S on macOS)
+  - Speed: + / -
+- Internal PDF Viewer (`pdf-viewer.html`):
+  - Toggle auto-scroll: Space
+  - Speed: + / -
+
+Shortcuts ignore inputs/textareas/contenteditable to avoid interfering while typing.
+
+## Open the PDF Viewer
+
+- From the popup, click "Open PDF Viewer" to open `pdf-viewer.html`.
+- You can then:
+  - Open a local PDF using the file picker.
+  - Or open a remote PDF by passing a `url` query param (http/https, data:, blob: allowed).
+
+> Note: The viewer blocks restricted schemes (e.g., chrome://, chrome-extension://, Web Store) and will show a friendly message instead of failing.
 
 ## Install (Load Unpacked)
 
@@ -24,17 +58,18 @@ Works on normal web pages and embedded PDF viewers. Chrome's built‑in PDF view
    npm install
    npm run build
    ```
-2. Open Chrome → chrome://extensions
+2. Open Chrome → `chrome://extensions`
 3. Enable Developer Mode
 4. Click "Load unpacked" and select this project folder
 
-The built files are in `dist/`. This repo includes `dist/` for convenience.
+The built files are in `dist/`.
 
 ## Development
 
-- Source popup (React + Vite): `index.html`, `index.tsx`, `App.tsx`
+- Popup (React + Vite): `index.html`, `index.tsx`, `App.tsx`
 - Content script: `content.ts`
 - Background service worker: `background.ts`
+- Internal PDF viewer: `pdf-viewer.html`, `pdf-viewer.ts`
 - Types/Helpers: `types.ts`, `hooks/`, `components/`
 
 Build:
@@ -42,29 +77,21 @@ Build:
 npm run build
 ```
 
-Package contents used by Chrome:
-- `manifest.json`
-- `dist/content.js`, `dist/background.js`, `dist/popup.js`, `dist/assets/popup.css`
-- `index.html` (popup), icons
-
 ## Permissions
 
 - `storage` – persist settings
-- `activeTab`, `scripting` – messaging/injection safety for keyboard shortcut fallback
+- `activeTab`, `scripting` – content script messaging/injection
 
 ## Known Limitations
 
-- Chrome's native PDF viewer runs in a restricted `chrome-extension://` origin and blocks third‑party content scripts. AutoScroll works on pages that embed PDFs in their own viewer (e.g., pdf.js), but not on the native viewer tab.
-- Planned workaround: an internal PDF viewer page using `pdfjs-dist`, opened with the original PDF URL ("Open with AutoScroll").
+- Chrome’s own PDF viewer tab (and other restricted pages like `chrome://` or the Web Store) block injections. AutoScroll works on normal sites and the extension’s internal viewer.
+
+## Support
+
+If you find this extension useful, please consider supporting development:
+
+- https://buymeacoffee.com/cenktekin ☕
 
 ## License
 
 MIT
-
-
-## Support
-
-If you find this extension useful, you can support development here:
-
-- https://buymeacoffee.com/cenktekin
-

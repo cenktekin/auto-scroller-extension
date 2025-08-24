@@ -7,7 +7,11 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "action": {
     "default_popup": "index.html",
@@ -26,6 +30,13 @@
         "mac": "Command+Shift+S"
       },
       "description": "Toggle auto-scrolling on the current page"
+    },
+    "toggle-reading-mode": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+R",
+        "mac": "Command+Shift+R"
+      },
+      "description": "Toggle Reading Mode (clean page for reading)"
     }
   },
   "icons": {
@@ -37,7 +48,11 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["content.js"],
+      "resources": [
+        "content.js",
+        "vendor/pdfjs/pdf.js",
+        "vendor/pdfjs/pdf.worker.js"
+      ],
       "matches": ["<all_urls>"]
     }
   ],

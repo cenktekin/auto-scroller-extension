@@ -25,6 +25,17 @@ declare namespace chrome {
     };
   }
 
+// Vite URL imports and pdfjs-dist modules
+declare module 'pdfjs-dist/build/pdf' {
+  const mod: any;
+  export = mod;
+}
+
+declare module 'pdfjs-dist/build/pdf.worker?url' {
+  const url: string;
+  export default url;
+}
+
   namespace storage {
     interface StorageArea {
       get(

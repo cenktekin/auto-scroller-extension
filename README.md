@@ -1,5 +1,7 @@
 # AutoScroll Reader (Chrome Extension)
 
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%E2%98%95%EF%B8%8F-orange)](https://buymeacoffee.com/cenktekin)
+
 AutoScroll Reader automatically scrolls pages with a visible focus line for comfortable reading.
 
 Works on normal web pages and embedded PDF viewers. Chrome's built‑in PDF viewer is not scriptable; see Known Limitations for a workaround plan.
@@ -58,4 +60,11 @@ Package contents used by Chrome:
 ## License
 
 MIT
+
+
+## Support
+
+If you find this extension useful, you can support development here:
+
+- https://buymeacoffee.com/cenktekin
 

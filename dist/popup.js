@@ -7248,7 +7248,17 @@ const App = () => {
           children: settings.isScrolling ? "Stop Scrolling" : "Start Scrolling"
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-center text-gray-400 mt-2", children: "Use Ctrl+Shift+S to toggle" })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-center text-gray-400 mt-2", children: "Use Ctrl+Shift+S to toggle" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] text-center mt-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "a",
+        {
+          href: "https://buymeacoffee.com/cenktekin",
+          target: "_blank",
+          rel: "noopener noreferrer",
+          className: "text-amber-400 hover:text-amber-300 underline",
+          children: "Buy me a coffee ☕"
+        }
+      ) })
     ] })
   ] });
 };

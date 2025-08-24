@@ -178,6 +178,16 @@ const App: React.FC = () => {
           {settings.isScrolling ? 'Stop Scrolling' : 'Start Scrolling'}
         </button>
         <p className="text-xs text-center text-gray-400 mt-2">Use Ctrl+Shift+S to toggle</p>
+        <p className="text-[10px] text-center mt-2">
+          <a
+            href="https://buymeacoffee.com/cenktekin"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-amber-400 hover:text-amber-300 underline"
+          >
+            Buy me a coffee ☕
+          </a>
+        </p>
       </footer>
     </div>
   );

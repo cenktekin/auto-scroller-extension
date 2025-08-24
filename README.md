@@ -17,11 +17,19 @@ AutoScroll Reader adds smooth auto-scrolling with a subtle focus line for comfor
 
 <p><strong>Reading Mode on Web Pages</strong></p>
 
+<a href="./auto-scroll-reading.mp4">
+  <img src="./auto-scroll-reading.gif" alt="Reading Mode demo GIF" width="520" />
+</a>
+
 <video src="./auto-scroll-reading.mp4" width="520" autoplay muted loop playsinline controls>
   <a href="./auto-scroll-reading.mp4">Watch the demo video</a>
 </video>
 
 <p><strong>PDF Auto-Scroll</strong></p>
+
+<a href="./auto-scroll-pdf.mp4">
+  <img src="./auto-scroll-pdf.gif" alt="PDF Auto-Scroll demo GIF" width="520" />
+</a>
 
 <video src="./auto-scroll-pdf.mp4" width="520" autoplay muted loop playsinline controls>
   <a href="./auto-scroll-pdf.mp4">Watch the demo video</a>

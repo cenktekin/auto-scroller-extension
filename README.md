@@ -7,9 +7,14 @@ AutoScroll Reader adds smooth auto-scrolling with a subtle focus line for comfor
 ## Highlights
 
 - Smooth, time-based auto-scroll with sub-pixel accumulation (works at very low speeds)
-- Customizable focus line: color, opacity, thickness
-- Settings persist via Chrome storage
+- Scroll direction: up or down
+- Auto-pause: temporarily pauses when you manually scroll, resumes after 1.5s
+- Customizable focus line: color, opacity, thickness, position (10%–90%)
+- Scroll progress bar at the top of the page
+- Speed feedback toast on +/- hotkey
+- Reading Mode: cleans up page layout for distraction-free reading
 - Internal PDF Viewer powered by `pdfjs-dist`
+- Settings persist via Chrome storage
 
 ## Demos
 
@@ -43,6 +48,7 @@ AutoScroll Reader adds smooth auto-scrolling with a subtle focus line for comfor
 
 - Web pages:
   - Toggle auto-scroll: Ctrl+Shift+S (Cmd+Shift+S on macOS)
+  - Toggle Reading Mode: Ctrl+Shift+R (Cmd+Shift+R on macOS)
   - Speed: + / -
 - Internal PDF Viewer (`pdf-viewer.html`):
   - Toggle auto-scroll: Space
@@ -68,7 +74,7 @@ Shortcuts ignore inputs/textareas/contenteditable to avoid interfering while typ
    ```
 2. Open Chrome → `chrome://extensions`
 3. Enable Developer Mode
-4. Click "Load unpacked" and select this project folder
+4. Click "Load unpacked" and select the `dist/` folder
 
 The built files are in `dist/`.
 
@@ -78,7 +84,7 @@ The built files are in `dist/`.
 - Content script: `content.ts`
 - Background service worker: `background.ts`
 - Internal PDF viewer: `pdf-viewer.html`, `pdf-viewer.ts`
-- Types/Helpers: `types.ts`, `hooks/`, `components/`
+- Types/Helpers: `types.ts`, `utils.ts`, `hooks/`, `components/`
 
 Build:
 ```bash

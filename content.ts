@@ -1,26 +1,7 @@
+import type { ReaderSettings, ChromeMessage } from './types';
+import { DEFAULT_SETTINGS } from './types';
+
 (() => {
-  // Define types directly
-  interface ReaderSettings {
-    scrollSpeed: number;
-    lineThickness: number;
-    lineColor: string;
-    lineOpacity: number;
-    isScrolling: boolean;
-  }
-
-  interface ChromeMessage {
-    type: 'TOGGLE_SCROLL' | 'UPDATE_SETTINGS' | 'GET_STATUS' | 'TOGGLE_READING_MODE';
-    payload?: Partial<ReaderSettings>;
-  }
-
-  // Use consistent DEFAULT_SETTINGS (matching types.ts)
-  const DEFAULT_SETTINGS: ReaderSettings = {
-    scrollSpeed: 5,
-    lineThickness: 3,
-    lineColor: '#00ffff', // Neon Blue
-    lineOpacity: 80,
-    isScrolling: false,
-  };
 
   // Error handling constants
   const ERROR_MESSAGES = {
@@ -46,15 +27,19 @@
   class AutoScrollController {
     private settings: ReaderSettings = DEFAULT_SETTINGS;
     private focusLine: HTMLElement | null = null;
+    private progressBar: HTMLElement | null = null;
     private animationFrameId: number | null = null;
     private readonly storageAvailable: boolean;
     private isToggling: boolean = false;
-    private readonly BASE_SPEED_PPS = 12; // pixels per second per speed unit (speed 10 => ~120px/s)
-    private readonly TOGGLE_TIMEOUT = 100; // ms
+    private readonly BASE_SPEED_PPS = 12;
+    private readonly TOGGLE_TIMEOUT = 100;
+    private readonly USER_PAUSE_RESUME_DELAY = 1500;
     private lastTimestamp: number | null = null;
     private subpixelRemainder = 0;
     private isReadingMode = false;
     private readingModeStyleEl: HTMLStyleElement | null = null;
+    private isPausedByUser = false;
+    private pauseTimeoutId: number | null = null;
 
     constructor() {
       this.storageAvailable = !!(typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local);
@@ -78,6 +63,7 @@
             const next = clamp(this.settings.scrollSpeed + (inc ? 1 : -1));
             if (next === this.settings.scrollSpeed) return;
             this.updateSettings({ scrollSpeed: next });
+            this.showSpeedToast(next);
             if (this.storageAvailable) {
               chrome.storage.local.set({ readerSettings: { ...this.settings, scrollSpeed: next } });
             }
@@ -90,14 +76,66 @@
       }
     }
 
+    private showSpeedToast(speed: number): void {
+      const existing = document.getElementById('autoscroll-speed-toast');
+      if (existing) existing.remove();
+      const toast = document.createElement('div');
+      toast.id = 'autoscroll-speed-toast';
+      toast.textContent = `Speed: ${speed}`;
+      Object.assign(toast.style, {
+        position: 'fixed',
+        bottom: '24px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        background: 'rgba(17, 24, 39, 0.9)',
+        color: '#e5e7eb',
+        padding: '6px 16px',
+        borderRadius: '8px',
+        fontSize: '13px',
+        fontFamily: 'system-ui, sans-serif',
+        zIndex: '2147483647',
+        pointerEvents: 'none',
+        transition: 'opacity 0.3s',
+        opacity: '1',
+      });
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 800);
+    }
+
+    private setupUserScrollPause(): void {
+      window.addEventListener('wheel', () => {
+        if (!this.settings.isScrolling || this.isPausedByUser) return;
+        this.isPausedByUser = true;
+        if (this.animationFrameId !== null) {
+          cancelAnimationFrame(this.animationFrameId);
+          this.animationFrameId = null;
+        }
+        if (this.pauseTimeoutId !== null) {
+          clearTimeout(this.pauseTimeoutId);
+        }
+        this.pauseTimeoutId = window.setTimeout(() => {
+          this.isPausedByUser = false;
+          this.pauseTimeoutId = null;
+          if (this.settings.isScrolling) {
+            this.lastTimestamp = null;
+            this.subpixelRemainder = 0;
+            this.animationFrameId = requestAnimationFrame(this.scrollStep);
+          }
+        }, this.USER_PAUSE_RESUME_DELAY);
+      }, { capture: true, passive: true });
+    }
+
     private async init(): Promise<void> {
       await this.loadSettings();
-      console.log('After loadSettings, isScrolling is:', this.settings.isScrolling);
       this.createFocusLine();
+      this.createProgressBar();
       this.setupMessageListener();
       this.setupStorageListener();
       this.setupSpeedHotkeys();
-      console.log('AutoScroll Reader content script loaded.');
+      this.setupUserScrollPause();
 
       if (this.settings.isScrolling) {
         this.startScrolling();
@@ -115,7 +153,6 @@
         try {
           chrome.storage.local.get('readerSettings', (result) => {
             try {
-              console.log('Loaded settings from storage:', result);
               if (chrome.runtime.lastError) {
                 handleChromeError('loading settings', chrome.runtime.lastError);
                 showUserError(ERROR_MESSAGES.STORAGE_LOAD_FAILED);
@@ -219,12 +256,9 @@
           }
         `;
 
-        // Apply style: use safeCSS for known-problematic domains, aggressive by default
         this.readingModeStyleEl = document.createElement('style');
         this.readingModeStyleEl.id = 'autoscroll-reading-style';
-        const host = location.hostname;
-        const useSafeFirst = /(^|\.)halktv\.com\.tr$/i.test(host);
-        this.readingModeStyleEl.textContent = useSafeFirst ? safeCSS : aggressiveCSS;
+        this.readingModeStyleEl.textContent = aggressiveCSS;
         document.head.appendChild(this.readingModeStyleEl);
         
         // Dynamic fallback: if layout collapses now or shortly after, switch to safeCSS once
@@ -234,7 +268,7 @@
           if (switched) return;
           try {
             const nowH = document.documentElement.scrollHeight;
-            if (!useSafeFirst && nowH > 0 && baseline > 0 && nowH / baseline < 0.6) {
+            if (nowH > 0 && baseline > 0 && nowH / baseline < 0.6) {
               this.readingModeStyleEl!.textContent = safeCSS;
               switched = true;
               cleanup();
@@ -324,15 +358,11 @@
         if (this.storageAvailable && chrome.storage.onChanged) {
           chrome.storage.onChanged.addListener((changes, namespace) => {
             try {
-              console.log('Storage changed:', changes, namespace);
               if (namespace === 'local' && changes.readerSettings) {
-                // If we are currently toggling, ignore storage changes
                 if (this.isToggling) {
-                  console.log('Ignoring storage change due to active toggle.');
                   return;
                 }
                 const newSettings = changes.readerSettings.newValue as ReaderSettings;
-                console.log('Updating settings from storage listener:', newSettings);
 
                 // Check what type of settings changed
                 const oldSettings = { ...this.settings };
@@ -345,31 +375,22 @@
 
                 // Handle scrolling state changes
                 if (isScrollingChanged) {
-                  console.log(`isScrolling changed from ${oldSettings.isScrolling} to ${newSettings.isScrolling}`);
-                  // Update the settings
                   this.settings.isScrolling = newSettings.isScrolling;
 
-                  // Update focus line visibility directly
                   if (this.focusLine) {
                     this.focusLine.style.visibility = this.settings.isScrolling ? 'visible' : 'hidden';
                   }
 
-                  // If scrolling is enabled, start it
                   if (this.settings.isScrolling) {
-                    console.log('Starting scrolling from storage change');
                     this.startScrolling();
                   }
-                  // If scrolling is disabled, stop it
                   else {
-                    console.log('Stopping scrolling from storage change');
                     this.stopScrolling();
                   }
                 }
 
                 // Handle focus line style changes
                 if (focusLineSettingsChanged) {
-                  console.log('Focus line settings changed, updating styles');
-                  // Update the settings (but preserve isScrolling state if it wasn't changed)
                   if (!isScrollingChanged) {
                     this.settings = { ...this.settings, ...newSettings };
                   } else {
@@ -424,22 +445,51 @@
       }
     }
 
+    private createProgressBar(): void {
+      if (this.progressBar) this.progressBar.remove();
+      this.progressBar = document.createElement('div');
+      this.progressBar.id = 'autoscroll-progress';
+      Object.assign(this.progressBar.style, {
+        position: 'fixed',
+        top: '0',
+        left: '0',
+        height: '3px',
+        width: '0%',
+        background: `linear-gradient(90deg, ${this.settings.lineColor}, ${this.settings.lineColor}aa)`,
+        zIndex: '2147483646',
+        pointerEvents: 'none',
+        transition: 'width 0.1s linear',
+        opacity: this.settings.isScrolling ? '1' : '0',
+      });
+      document.body?.appendChild(this.progressBar);
+    }
+
+    private updateProgress(): void {
+      if (!this.progressBar) return;
+      const scroller = document.scrollingElement || document.documentElement;
+      const maxScroll = Math.max(1, scroller.scrollHeight - window.innerHeight);
+      const pct = Math.min(100, (scroller.scrollTop / maxScroll) * 100);
+      this.progressBar.style.width = `${pct}%`;
+      this.progressBar.style.opacity = this.settings.isScrolling ? '1' : '0';
+    }
+
     private applyFocusLineStyle(): void {
       if (!this.focusLine) return;
       const color = this.settings.lineColor;
       const thickness = this.settings.lineThickness;
       const opacity = this.settings.lineOpacity / 100;
+      const position = this.settings.focusLinePosition;
       
       Object.assign(this.focusLine.style, {
         position: 'fixed',
-        top: '50%', // Start at the center
+        top: `${position}%`,
         left: '0',
         width: '100%',
         height: `${thickness}px`,
         backgroundColor: color,
         boxShadow: `0 0 5px ${color}, 0 0 10px ${color}, 0 0 15px ${color}`,
         opacity: opacity.toString(),
-        zIndex: '2147483647', // Max z-index
+        zIndex: '2147483647',
         pointerEvents: 'none',
         transition: 'opacity 0.2s',
         visibility: this.settings.isScrolling ? 'visible' : 'hidden',
@@ -449,51 +499,50 @@
     public updateSettings(newSettings: Partial<ReaderSettings>): void {
       const oldSettings = { ...this.settings };
       this.settings = { ...this.settings, ...newSettings };
-      console.log('Settings updated:', this.settings);
-      console.log(`isScrolling before update: ${oldSettings.isScrolling}, isScrolling after update: ${this.settings.isScrolling}`);
       
-      // Check if focus line related settings have changed
       const focusLineSettingsChanged = 
         oldSettings.lineColor !== this.settings.lineColor ||
         oldSettings.lineThickness !== this.settings.lineThickness ||
-        oldSettings.lineOpacity !== this.settings.lineOpacity;
+        oldSettings.lineOpacity !== this.settings.lineOpacity ||
+        oldSettings.focusLinePosition !== this.settings.focusLinePosition;
       
       if (focusLineSettingsChanged) {
-        // Re-create the focus line to ensure it exists and has the correct styles
-        this.createFocusLine();
-      } else {
-        // Just apply the new styles
         this.applyFocusLineStyle();
       }
     }
 
     private scrollStep = (timestamp: number): void => {
-      if (!this.settings.isScrolling) return;
+      if (!this.settings.isScrolling || this.isPausedByUser) return;
 
-      // Compute dt in seconds
       const dt = this.lastTimestamp === null ? (1 / 60) : Math.max(0, (timestamp - this.lastTimestamp) / 1000);
       this.lastTimestamp = timestamp;
 
-      // Pixels per second based on current speed
-      const pps = this.BASE_SPEED_PPS * this.settings.scrollSpeed; // 0..120 px/s by default
-      let delta = pps * dt + this.subpixelRemainder; // pixels to move this frame (can be fractional)
+      const pps = this.BASE_SPEED_PPS * this.settings.scrollSpeed;
+      if (pps === 0) {
+        this.animationFrameId = requestAnimationFrame(this.scrollStep);
+        return;
+      }
 
-      // Convert to integer pixels, carry remainder for next frame
+      const direction = this.settings.scrollDirection === 'up' ? -1 : 1;
+      let delta = direction * pps * dt + this.subpixelRemainder;
+
       const intDelta = delta > 0 ? Math.floor(delta) : Math.ceil(delta);
       this.subpixelRemainder = delta - intDelta;
 
       const scroller = document.scrollingElement || document.documentElement;
       const maxScrollTop = Math.max(0, scroller.scrollHeight - window.innerHeight);
-      const prevTop = scroller.scrollTop;
 
       if (intDelta !== 0) {
-        const nextTop = Math.max(0, Math.min(prevTop + intDelta, maxScrollTop));
+        const nextTop = Math.max(0, Math.min(scroller.scrollTop + intDelta, maxScrollTop));
         scroller.scrollTop = nextTop;
+        this.updateProgress();
       }
 
-      // Bottom detection
-      const atBottom = scroller.scrollTop >= maxScrollTop;
-      if (atBottom) {
+      const atBoundary = this.settings.scrollDirection === 'down'
+        ? scroller.scrollTop >= maxScrollTop
+        : scroller.scrollTop <= 0;
+
+      if (atBoundary) {
         this.stopScrolling();
         if (this.storageAvailable) {
           chrome.storage.local.set({
@@ -506,52 +555,38 @@
     };
 
     private startScrolling(): void {
-      console.log('Starting scrolling. this.settings.isScrolling is:', this.settings.isScrolling);
-      // If an animation loop is already running, do nothing (idempotent)
       if (this.animationFrameId !== null) {
-        console.log('Scroll loop already running.');
         return;
       }
-      // Ensure state reflects running
       this.settings.isScrolling = true;
       if (this.focusLine) this.focusLine.style.visibility = 'visible';
-      console.log('Focus line visibility set to visible.');
+      if (this.progressBar) {
+        this.progressBar.style.opacity = '1';
+        this.updateProgress();
+      }
       
-      console.log('Requesting new animation frame.');
-      // reset timing state
       this.lastTimestamp = null;
       this.subpixelRemainder = 0;
       this.animationFrameId = requestAnimationFrame(this.scrollStep);
-      console.log('Animation frame requested. ID:', this.animationFrameId);
     }
 
     private stopScrolling(): void {
-      console.log('Stopping scrolling...');
-      // Always ensure we stop the loop even if isScrolling flag is out-of-sync
       this.settings.isScrolling = false;
       if (this.focusLine) this.focusLine.style.visibility = 'hidden';
-      console.log('Focus line visibility set to hidden.');
+      if (this.progressBar) this.progressBar.style.opacity = '0';
 
       if (this.animationFrameId !== null) {
-        console.log('Cancelling animation frame.');
         cancelAnimationFrame(this.animationFrameId);
         this.animationFrameId = null;
-      } else {
-        console.log('No animation frame to cancel.');
       }
-      // clear timing state
       this.lastTimestamp = null;
       this.subpixelRemainder = 0;
     }
 
     public toggleScrolling(): void {
-      // Prevent storage listener from interfering
       this.isToggling = true;
       
-      console.log('Toggling scrolling. this.settings.isScrolling is:', this.settings.isScrolling);
       const newState = !this.settings.isScrolling;
-      console.log('New state will be:', newState);
-      console.log('Current animationFrameId:', this.animationFrameId);
       
       if (newState) {
         this.startScrolling();
@@ -559,37 +594,32 @@
         this.stopScrolling();
       }
       
-      // Update the settings object
       this.settings.isScrolling = newState;
-      console.log('Updated this.settings.isScrolling to:', this.settings.isScrolling);
       
-      // Persist the state change
       if (this.storageAvailable) {
         try {
           chrome.storage.local.set({
             readerSettings: { ...this.settings }
           }).then(() => {
             try {
-              // Allow storage listener to interfere again after a small delay
               setTimeout(() => {
                 this.isToggling = false;
               }, this.TOGGLE_TIMEOUT);
             } catch (error) {
               handleChromeError('resetting toggle flag after storage save', error);
-              this.isToggling = false; // Ensure we reset the flag even on error
+              this.isToggling = false;
             }
           }).catch((error) => {
             handleChromeError('saving settings to storage', error);
             showUserError(ERROR_MESSAGES.STORAGE_SAVE_FAILED);
-            this.isToggling = false; // Reset flag even on error
+            this.isToggling = false;
           });
         } catch (error) {
           handleChromeError('storage set operation', error);
           showUserError(ERROR_MESSAGES.STORAGE_SAVE_FAILED);
-          this.isToggling = false; // Reset flag even on error
+          this.isToggling = false;
         }
       } else {
-        // Allow storage listener to interfere again after a small delay
         setTimeout(() => {
           this.isToggling = false;
         }, this.TOGGLE_TIMEOUT);
@@ -598,12 +628,8 @@
   }
 
   // Ensure the script is only injected and run once
-  console.log('Checking if content script is already injected:', (window as any).autoScrollReaderInjected);
   if (!(window as any).autoScrollReaderInjected) {
-    console.log('Injecting content script...');
     (window as any).autoScrollReaderInjected = true;
     new AutoScrollController();
-  } else {
-    console.log('Content script is already injected. Skipping.');
   }
 })();

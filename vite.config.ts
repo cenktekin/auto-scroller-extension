@@ -43,8 +43,6 @@ export default defineConfig({
         assetFileNames: 'assets/[name].[ext]',
       },
     },
-    // Disabling minification makes debugging easier.
-    // For a production release, you might want to set this to true.
-    minify: false,
+    minify: true,
   },
 });

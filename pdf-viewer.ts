@@ -2,23 +2,8 @@
 // Import pdf.js as ES module and set worker via URL
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker?url';
-
-// Match the ReaderSettings used by content.ts
-interface ReaderSettings {
-  scrollSpeed: number;
-  lineThickness: number;
-  lineColor: string;
-  lineOpacity: number; // 0-100
-  isScrolling: boolean;
-}
-
-const DEFAULT_SETTINGS: ReaderSettings = {
-  scrollSpeed: 5,
-  lineThickness: 3,
-  lineColor: '#00ffff',
-  lineOpacity: 80,
-  isScrolling: false,
-};
+import type { ReaderSettings } from './types';
+import { DEFAULT_SETTINGS } from './types';
 
 function getParam(name: string): string | null {
   const url = new URL(window.location.href);
@@ -122,7 +107,12 @@ function step(now: number) {
   const dt = lastTs === null ? (1 / 60) : Math.max(0, (now - lastTs) / 1000);
   lastTs = now;
   const pps = Math.max(0, BASE_SPEED_PPS * (settings?.scrollSpeed ?? DEFAULT_SETTINGS.scrollSpeed));
-  let delta = pps * dt + subpixelRemainder;
+  if (pps === 0) {
+    rafId = requestAnimationFrame(step);
+    return;
+  }
+  const direction = (settings?.scrollDirection ?? 'down') === 'up' ? -1 : 1;
+  let delta = direction * pps * dt + subpixelRemainder;
   const intDelta = delta > 0 ? Math.floor(delta) : Math.ceil(delta);
   subpixelRemainder = delta - intDelta;
   const canScrollContainer = container.scrollHeight - container.clientHeight > 1;
@@ -249,9 +239,34 @@ function setupStorageListener() {
     });
   }
 
-  // Wire toggle button
   const btn = document.getElementById('toggle-scroll');
   if (btn) btn.addEventListener('click', () => toggleScroll());
+
+  const dirUp = document.getElementById('dir-up');
+  const dirDown = document.getElementById('dir-down');
+  const updateDirectionUI = () => {
+    const dir = settings?.scrollDirection ?? 'down';
+    if (dirUp) {
+      dirUp.className = dir === 'up'
+        ? 'text-xs bg-cyan-500 text-white px-2 py-1 rounded'
+        : 'text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded';
+    }
+    if (dirDown) {
+      dirDown.className = dir === 'down'
+        ? 'text-xs bg-cyan-500 text-white px-2 py-1 rounded'
+        : 'text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded';
+    }
+  };
+  if (dirUp) dirUp.addEventListener('click', () => {
+    settings.scrollDirection = 'up';
+    updateDirectionUI();
+    try { chrome.storage?.local?.set?.({ readerSettings: { ...settings } }); } catch {}
+  });
+  if (dirDown) dirDown.addEventListener('click', () => {
+    settings.scrollDirection = 'down';
+    updateDirectionUI();
+    try { chrome.storage?.local?.set?.({ readerSettings: { ...settings } }); } catch {}
+  });
 
   // Keyboard shortcut: Space
   window.addEventListener('keydown', (e) => {

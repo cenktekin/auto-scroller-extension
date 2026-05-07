@@ -5,14 +5,18 @@ export interface ReaderSettings {
   lineColor: string;
   lineOpacity: number;
   isScrolling: boolean;
+  scrollDirection: 'down' | 'up';
+  focusLinePosition: number;
 }
 
 export const DEFAULT_SETTINGS: ReaderSettings = {
   scrollSpeed: 5,
   lineThickness: 3,
-  lineColor: '#00ffff', // Neon Blue
+  lineColor: '#00ffff',
   lineOpacity: 80,
   isScrolling: false,
+  scrollDirection: 'down',
+  focusLinePosition: 50,
 };
 
 export interface ChromeMessage {

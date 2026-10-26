@@ -3,11 +3,13 @@
 chrome.runtime.onInstalled.addListener(() => {
   console.log('AutoScroll Reader installed.');
 
-  // Create context menu item to open PDFs with internal viewer
-  chrome.contextMenus.create({
-    id: 'open-with-autoscroll-viewer',
-    title: 'Open with AutoScroll PDF Viewer',
-    contexts: ['page', 'frame', 'link']
+  // Recreate context menu idempotently (onInstalled also fires on updates)
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: 'open-with-autoscroll-viewer',
+      title: 'Open with AutoScroll PDF Viewer',
+      contexts: ['page', 'frame', 'link']
+    });
   });
 });
 
@@ -25,11 +27,14 @@ chrome.commands.onCommand.addListener((command) => {
             if(tabs[0].id) {
               chrome.scripting.executeScript({
                 target: { tabId: tabs[0].id },
-                files: ['content.js'],
-                world: "MAIN"
+                files: ['content.js']
               }).then(() => {
                 if(tabs[0].id) {
-                  chrome.tabs.sendMessage(tabs[0].id, { type: 'TOGGLE_SCROLL' });
+                  chrome.tabs.sendMessage(tabs[0].id, { type: 'TOGGLE_SCROLL' }, () => {
+                    if (chrome.runtime.lastError) {
+                      console.warn('AutoScroll Reader: retry after injection failed:', chrome.runtime.lastError.message);
+                    }
+                  });
                 }
               }).catch(err => console.error("Failed to inject script:", err));
             }
@@ -47,11 +52,14 @@ chrome.commands.onCommand.addListener((command) => {
             if (tabs[0].id) {
               chrome.scripting.executeScript({
                 target: { tabId: tabs[0].id },
-                files: ['content.js'],
-                world: 'MAIN'
+                files: ['content.js']
               }).then(() => {
                 if (tabs[0].id) {
-                  chrome.tabs.sendMessage(tabs[0].id, { type: 'TOGGLE_READING_MODE' });
+                  chrome.tabs.sendMessage(tabs[0].id, { type: 'TOGGLE_READING_MODE' }, () => {
+                    if (chrome.runtime.lastError) {
+                      console.warn('AutoScroll Reader: retry after injection failed:', chrome.runtime.lastError.message);
+                    }
+                  });
                 }
               }).catch(err => console.error('Failed to inject script:', err));
             }

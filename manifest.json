@@ -46,16 +46,6 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "content.js",
-        "vendor/pdfjs/pdf.js",
-        "vendor/pdfjs/pdf.worker.js"
-      ],
-      "matches": ["<all_urls>"]
-    }
-  ],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

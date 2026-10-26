@@ -1,17 +1,28 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { ReaderSettings, ChromeMessage } from './types';
+import React, { useState, useEffect, useCallback } from 'react';
+import type { ReaderSettings, ChromeMessage, ReadingStats } from './types';
 import { useReaderSettings } from './hooks/useChromeStorage';
+import { useSiteSettings } from './hooks/useSiteSettings';
 import { Slider } from './components/Slider';
 import { ColorButton } from './components/ColorButton';
-import { isInjectableUrl } from './utils';
+import { ToggleButton } from './components/ToggleButton';
+import { isInjectableUrl, hostFromUrl } from './utils';
 
 const NEON_COLORS = ['#00ffff', '#39ff14', '#ff00ff', '#ff3366', '#fdda0d'];
 
 const App: React.FC = () => {
   const [settings, updateSettings] = useReaderSettings();
-  const toggleCountRef = useRef(0);
+  const { siteSettings, setOverride, clearOverride, isPerSite, setPerSite } = useSiteSettings();
+  const [currentHost, setCurrentHost] = useState<string | null>(null);
   const [isContentScriptActive, setIsContentScriptActive] = useState(false);
+  const [isScrolling, setIsScrolling] = useState(false);
+  const [smartSpeedEnabled, setSmartSpeedEnabled] = useState(false);
+  const [readingStats, setReadingStats] = useState<ReadingStats & { sessionDuration: number }>({
+    totalSeconds: 0,
+    totalWords: 0,
+    sessions: 0,
+    sessionDuration: 0
+  });
 
   const isChromeApiAvailable = typeof chrome !== 'undefined' && chrome.tabs && chrome.scripting && chrome.runtime;
 
@@ -35,15 +46,18 @@ const App: React.FC = () => {
           chrome.tabs.sendMessage(tabId, message, (response) => {
             if (!chrome.runtime.lastError && response) {
               if (response.isScrolling !== undefined) {
-                  updateSettings({ isScrolling: response.isScrolling });
+                  setIsScrolling(response.isScrolling);
               }
               setIsContentScriptActive(true);
             }
           });
-        }).catch(() => {});
+        }).catch((err) => {
+          console.warn('AutoScroll Reader: could not inject content script:', err);
+          setIsContentScriptActive(false);
+        });
       }
     });
-  }, [isChromeApiAvailable, updateSettings]);
+  }, [isChromeApiAvailable]);
   
   useEffect(() => {
     if (!isChromeApiAvailable) {
@@ -54,6 +68,7 @@ const App: React.FC = () => {
       if (tabs[0] && tabs[0].id) {
         const tabId = tabs[0].id;
         const tabUrl = (tabs[0] as any).url as string | undefined;
+        setCurrentHost(hostFromUrl(tabUrl));
         if (!isInjectableUrl(tabUrl)) {
           setIsContentScriptActive(false);
           return;
@@ -64,22 +79,28 @@ const App: React.FC = () => {
         }).then(() => {
           chrome.tabs.sendMessage(tabId, { type: 'GET_STATUS' }, (response) => {
             if (!chrome.runtime.lastError && response) {
-              updateSettings({ isScrolling: response.isScrolling });
+              setIsScrolling(response.isScrolling);
               setIsContentScriptActive(true);
             } else {
                setIsContentScriptActive(false);
             }
           });
-        }).catch(() => {
+          chrome.tabs.sendMessage(tabId, { type: 'GET_READING_STATS' }, (response) => {
+            if (!chrome.runtime.lastError && response) {
+              setReadingStats(response);
+              setSmartSpeedEnabled(response.smartSpeedEnabled ?? false);
+            }
+          });
+        }).catch((err) => {
+          console.warn('AutoScroll Reader: could not inject content script:', err);
           setIsContentScriptActive(false);
         });
       }
     });
-  }, [isChromeApiAvailable, updateSettings]);
+  }, [isChromeApiAvailable]);
 
 
   const handleToggleScrolling = () => {
-    toggleCountRef.current++;
     sendMessageToContentScript({ type: 'TOGGLE_SCROLL' });
   };
   
@@ -96,9 +117,24 @@ const App: React.FC = () => {
     }
   };
   
+  const siteOverride = currentHost ? siteSettings[currentHost] : undefined;
+  const perSiteEnabled = isPerSite(currentHost);
+  const activeSettings = perSiteEnabled && siteOverride ? { ...settings, ...siteOverride } : settings;
+  const hasSiteOverride = !!siteOverride;
+
   const handleSettingChange = (update: Partial<ReaderSettings>) => {
-    updateSettings(update);
+    if (perSiteEnabled && currentHost) {
+      setOverride(currentHost, update);
+    } else {
+      updateSettings(update);
+    }
     sendMessageToContentScript({ type: 'UPDATE_SETTINGS', payload: update });
+  };
+
+  const handleTogglePerSite = () => setPerSite(currentHost, !perSiteEnabled);
+
+  const handleResetSite = () => {
+    if (currentHost) clearOverride(currentHost);
   };
 
   return (
@@ -113,7 +149,7 @@ const App: React.FC = () => {
           label="Scroll Speed"
           min={0}
           max={10}
-          value={settings.scrollSpeed}
+          value={activeSettings.scrollSpeed}
           onChange={(e) => handleSettingChange({ scrollSpeed: parseInt(e.target.value, 10) })}
         />
         
@@ -122,8 +158,9 @@ const App: React.FC = () => {
           <div className="flex gap-1">
             <button
               onClick={() => handleSettingChange({ scrollDirection: 'up' })}
+              aria-pressed={activeSettings.scrollDirection === 'up'}
               className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                settings.scrollDirection === 'up'
+                activeSettings.scrollDirection === 'up'
                   ? 'bg-cyan-500 text-white'
                   : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
@@ -132,8 +169,9 @@ const App: React.FC = () => {
             </button>
             <button
               onClick={() => handleSettingChange({ scrollDirection: 'down' })}
+              aria-pressed={activeSettings.scrollDirection === 'down'}
               className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                settings.scrollDirection === 'down'
+                activeSettings.scrollDirection === 'down'
                   ? 'bg-cyan-500 text-white'
                   : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
@@ -150,7 +188,7 @@ const App: React.FC = () => {
               label="Thickness"
               min={1}
               max={50}
-              value={settings.lineThickness}
+              value={activeSettings.lineThickness}
               onChange={(e) => handleSettingChange({ lineThickness: parseInt(e.target.value, 10) })}
               unit="px"
             />
@@ -158,7 +196,7 @@ const App: React.FC = () => {
               label="Opacity"
               min={0}
               max={100}
-              value={settings.lineOpacity}
+              value={activeSettings.lineOpacity}
               onChange={(e) => handleSettingChange({ lineOpacity: parseInt(e.target.value, 10) })}
               unit="%"
             />
@@ -166,7 +204,7 @@ const App: React.FC = () => {
               label="Position"
               min={10}
               max={90}
-              value={settings.focusLinePosition}
+              value={activeSettings.focusLinePosition}
               onChange={(e) => handleSettingChange({ focusLinePosition: parseInt(e.target.value, 10) })}
               unit="%"
             />
@@ -175,7 +213,7 @@ const App: React.FC = () => {
                 <ColorButton
                   key={color}
                   color={color}
-                  isSelected={settings.lineColor === color}
+                  isSelected={activeSettings.lineColor === color}
                   onClick={() => handleSettingChange({ lineColor: color })}
                 />
               ))}
@@ -184,16 +222,53 @@ const App: React.FC = () => {
         </div>
       </main>
 
+      <section className="p-3 bg-gray-700/50 rounded-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-gray-300">Site settings</div>
+            <div className="text-[11px] text-gray-400">{currentHost ?? 'No site'}</div>
+          </div>
+          <div className="flex items-center gap-1">
+            {perSiteEnabled && hasSiteOverride && (
+              <button
+                onClick={handleResetSite}
+                className="px-2 py-1 text-xs font-medium rounded bg-gray-600 text-gray-300 hover:bg-gray-500 transition-colors"
+              >
+                Reset
+              </button>
+            )}
+            <ToggleButton
+              enabled={perSiteEnabled}
+              onClick={handleTogglePerSite}
+              disabled={!currentHost}
+              title={currentHost ? 'Apply settings to this site only' : 'No injectable site'}
+            />
+          </div>
+        </div>
+        <p className="text-[11px] text-gray-400">
+          When ON, changes apply only to this site.
+        </p>
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-gray-300">Auto-start on load</span>
+          <ToggleButton
+            enabled={!!activeSettings.autoStartOnLoad}
+            onClick={() => handleSettingChange({ autoStartOnLoad: !activeSettings.autoStartOnLoad })}
+            activeClass="bg-green-500 text-white"
+          />
+        </div>
+      </section>
+
       <footer className="pt-3 border-t border-gray-700 space-y-3">
         <button
           onClick={handleToggleScrolling}
+          aria-pressed={isScrolling}
           className={`w-full py-3 text-lg font-semibold rounded-lg transition-colors duration-200 ${
-            settings.isScrolling
+            isScrolling
               ? 'bg-red-600 hover:bg-red-700'
               : 'bg-cyan-500 hover:bg-cyan-600'
           }`}
         >
-          {settings.isScrolling ? 'Stop Scrolling' : 'Start Scrolling'}
+          {isScrolling ? 'Stop Scrolling' : 'Start Scrolling'}
         </button>
         <p className="text-xs text-center text-gray-400">Shortcut: Ctrl+Shift+S</p>
 
@@ -214,6 +289,55 @@ const App: React.FC = () => {
           </button>
         </div>
         <p className="text-[11px] text-center text-gray-400">Reading Mode shortcut: Ctrl+Shift+R</p>
+
+        <div className="p-3 bg-gray-700/50 rounded-lg space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-gray-300">Smart Speed</span>
+            <ToggleButton
+              enabled={smartSpeedEnabled}
+              onClick={() => {
+                sendMessageToContentScript({ type: 'TOGGLE_SMART_SPEED' });
+                setSmartSpeedEnabled(!smartSpeedEnabled);
+              }}
+              activeClass="bg-green-500 text-white"
+            />
+          </div>
+          <p className="text-[11px] text-gray-400">
+            Adjusts speed based on text density
+          </p>
+        </div>
+
+        {(readingStats.totalSeconds > 0 || readingStats.sessionDuration > 0) && (
+          <div className="p-3 bg-gray-700/50 rounded-lg space-y-2">
+            <h3 className="text-sm font-medium text-gray-300">Today's Reading</h3>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="text-center p-2 bg-gray-600/50 rounded">
+                <div className="text-cyan-400 font-bold">
+                  {Math.floor(readingStats.totalSeconds / 60)}m
+                </div>
+                <div className="text-gray-400">Total</div>
+              </div>
+              <div className="text-center p-2 bg-gray-600/50 rounded">
+                <div className="text-cyan-400 font-bold">
+                  {readingStats.totalWords.toLocaleString()}
+                </div>
+                <div className="text-gray-400">Words</div>
+              </div>
+              <div className="text-center p-2 bg-gray-600/50 rounded">
+                <div className="text-cyan-400 font-bold">
+                  {readingStats.sessions}
+                </div>
+                <div className="text-gray-400">Sessions</div>
+              </div>
+              <div className="text-center p-2 bg-gray-600/50 rounded">
+                <div className="text-cyan-400 font-bold">
+                  {Math.floor(readingStats.sessionDuration / 60)}m
+                </div>
+                <div className="text-gray-400">Current</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center justify-between">
           <a

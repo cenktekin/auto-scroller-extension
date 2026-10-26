@@ -1,3 +1,5 @@
+import type { ReaderSettings, PerSiteSettings } from './types';
+
 export function isInjectableUrl(url?: string): boolean {
   if (!url) return false;
   try {
@@ -11,4 +13,21 @@ export function isInjectableUrl(url?: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Returns the hostname of an http(s) URL, or null for unsupported schemes. */
+export function hostFromUrl(url?: string): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return u.hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Merges global settings with a per-site override (override wins). Always returns a new object. */
+export function resolveSettings(base: ReaderSettings, override?: PerSiteSettings): ReaderSettings {
+  return { ...base, ...(override ?? {}) };
 }

@@ -11,12 +11,13 @@ function getParam(name: string): string | null {
   return v;
 }
 
-async function renderPdfFromUrl(url: string) {
-  // Configure worker
+async function renderPdf(source: string | ArrayBuffer) {
   (pdfjsLib as any).GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
   const viewer = document.getElementById('viewer')!;
-  viewer.innerHTML = '';
-  const loadingTask = pdfjsLib.getDocument(url);
+  viewer.replaceChildren();
+  const loadingTask = typeof source === 'string'
+    ? pdfjsLib.getDocument(source)
+    : pdfjsLib.getDocument({ data: new Uint8Array(source) });
   const pdf = await loadingTask.promise;
   const padding = 32; // #viewer has 16px left+right
   const containerWidth = Math.max(320, (viewer.clientWidth || window.innerWidth) - padding);
@@ -47,45 +48,20 @@ async function renderPdfFromUrl(url: string) {
   }
 }
 
-async function renderPdfFromData(data: ArrayBuffer) {
-  (pdfjsLib as any).GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
-  const viewer = document.getElementById('viewer')!;
-  viewer.innerHTML = '';
-  const uint8 = new Uint8Array(data);
-  const loadingTask = pdfjsLib.getDocument({ data: uint8 });
-  const pdf = await loadingTask.promise;
-  const padding = 32;
-  const containerWidth = Math.max(320, (viewer.clientWidth || window.innerWidth) - padding);
-  const containerHeight = viewer.clientHeight || window.innerHeight;
-  const dpr = window.devicePixelRatio || 1;
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-    const page = await pdf.getPage(pageNum);
-    const vw1 = page.getViewport({ scale: 1 });
-    let scale = Math.max(0.8, containerWidth / vw1.width);
-    const minHeightScale = (containerHeight * 1.1) / vw1.height;
-    if (vw1.height * scale < containerHeight * 0.95) {
-      scale = Math.max(scale, minHeightScale);
-    }
-    scale = Math.min(3, scale);
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (!ctx) continue;
-    canvas.style.width = `${viewport.width}px`;
-    canvas.style.height = `${viewport.height}px`;
-    canvas.width = Math.floor(viewport.width * dpr);
-    canvas.height = Math.floor(viewport.height * dpr);
-    viewer.appendChild(canvas);
-    await page.render({ canvasContext: ctx, viewport, transform: [dpr, 0, 0, dpr, 0, 0] }).promise;
-  }
-}
-
 let settings: ReaderSettings = { ...DEFAULT_SETTINGS };
 let isScrolling = false;
 let rafId: number | null = null;
 let lastTs: number | null = null;
 let subpixelRemainder = 0;
 const BASE_SPEED_PPS = 12; // consistent with content.ts
+
+function persistSettings() {
+  try {
+    chrome.storage?.local?.set?.({ readerSettings: { ...settings, isScrolling } });
+  } catch (error) {
+    console.warn('AutoScroll Reader: failed to persist PDF viewer state:', error);
+  }
+}
 
 function updateUi() {
   const btn = document.getElementById('toggle-scroll') as HTMLButtonElement | null;
@@ -138,7 +114,7 @@ function startScroll() {
   const container = document.getElementById('viewer');
   if (container) container.scrollTop = container.scrollTop + 1;
   // persist state so popup reflects it
-  try { chrome.storage?.local?.set?.({ readerSettings: { ...settings, isScrolling: true } }); } catch {}
+  persistSettings();
   rafId = requestAnimationFrame(step);
 }
 
@@ -150,7 +126,7 @@ function stopScroll() {
   }
   updateUi();
   // persist state so popup reflects it
-  try { chrome.storage?.local?.set?.({ readerSettings: { ...settings, isScrolling: false } }); } catch {}
+  persistSettings();
 }
 
 function toggleScroll() { isScrolling ? stopScroll() : startScroll(); }
@@ -175,7 +151,7 @@ function setSpeed(newSpeed: number) {
   const clamped = clampSpeed(newSpeed);
   if (settings.scrollSpeed === clamped) return;
   settings.scrollSpeed = clamped;
-  try { chrome.storage?.local?.set?.({ readerSettings: { ...settings } }); } catch {}
+  persistSettings();
 }
 
 async function loadSettings(): Promise<void> {
@@ -188,11 +164,15 @@ async function loadSettings(): Promise<void> {
             settings = { ...settings, ...(result.readerSettings as ReaderSettings) };
             isScrolling = !!settings.isScrolling; // sync initial
           }
-        } catch {}
+        } catch (error) {
+          console.warn('AutoScroll Reader: failed to parse stored settings:', error);
+        }
         resolve();
       });
     });
-  } catch {}
+  } catch (error) {
+    console.warn('AutoScroll Reader: failed to load settings:', error);
+  }
 }
 
 function setupStorageListener() {
@@ -228,7 +208,7 @@ function setupStorageListener() {
       if (!file) return;
       try {
         const buf = await file.arrayBuffer();
-        await renderPdfFromData(buf);
+        await renderPdf(buf);
         // do not auto-start; keep state
         stopScroll();
       } catch (e) {
@@ -260,12 +240,12 @@ function setupStorageListener() {
   if (dirUp) dirUp.addEventListener('click', () => {
     settings.scrollDirection = 'up';
     updateDirectionUI();
-    try { chrome.storage?.local?.set?.({ readerSettings: { ...settings } }); } catch {}
+    persistSettings();
   });
   if (dirDown) dirDown.addEventListener('click', () => {
     settings.scrollDirection = 'down';
     updateDirectionUI();
-    try { chrome.storage?.local?.set?.({ readerSettings: { ...settings } }); } catch {}
+    persistSettings();
   });
 
   // Keyboard shortcut: Space
@@ -313,7 +293,7 @@ function setupStorageListener() {
       stopScroll();
       return;
     }
-    renderPdfFromUrl(url).then(() => {
+    renderPdf(url).then(() => {
       // honor current settings; do not force start
       if (settings.isScrolling) startScroll(); else stopScroll();
     }).catch(err => {

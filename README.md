@@ -12,9 +12,13 @@ AutoScroll Reader adds smooth auto-scrolling with a subtle focus line for comfor
 - Customizable focus line: color, opacity, thickness, position (10%–90%)
 - Scroll progress bar at the top of the page
 - Speed feedback toast on +/- hotkey
+- Smart Speed: adapts the scroll speed to the text density of the page
+- Per-site settings: override speed, focus line and auto-start for one site only
+- Auto-start on load, for the sites where you enable it
+- Reading stats for today: time, words and sessions
 - Reading Mode: cleans up page layout for distraction-free reading
 - Internal PDF Viewer powered by `pdfjs-dist`
-- Settings persist via Chrome storage
+- Settings persist via Chrome storage and sync across signed-in Chrome profiles
 
 ## Demos
 
@@ -88,13 +92,19 @@ The built files are in `dist/`.
 
 Build:
 ```bash
-npm run build
+npm run typecheck   # tsc --noEmit
+npm test            # node:test unit tests, no extra dependency
+npm run build       # typecheck + vite build into dist/
 ```
+
+`npm run build` fails on a type error.
 
 ## Permissions
 
 - `storage` – persist settings
 - `activeTab`, `scripting` – content script messaging/injection
+- `contextMenus` – "Open with AutoScroll PDF Viewer" menu item
+- Host access to all sites – the reader has to work on any article page you open
 
 ## Known Limitations
 

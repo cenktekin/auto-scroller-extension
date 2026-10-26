@@ -1,7 +1,147 @@
-import type { ReaderSettings, ChromeMessage } from './types';
-import { DEFAULT_SETTINGS } from './types';
+import type { ReaderSettings, ReadingStats, ChromeMessage, SiteSettingsMap } from './types';
+import { DEFAULT_SETTINGS, SITE_MODE_KEY, SITE_SETTINGS_KEY } from './types';
+import { resolveSettings } from './utils';
 
 (() => {
+
+  class TextDensityAnalyzer {
+    private cachedDensity: number = 0;
+    private lastAnalysisTime: number = 0;
+    private readonly ANALYSIS_INTERVAL = 2000;
+
+    analyze(): number {
+      const now = Date.now();
+      if (now - this.lastAnalysisTime < this.ANALYSIS_INTERVAL) {
+        return this.cachedDensity;
+      }
+      
+      const viewportHeight = window.innerHeight;
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      const viewportTop = scrollTop;
+      const viewportBottom = scrollTop + viewportHeight;
+      
+      const textNodes = this.getVisibleTextNodes(viewportTop, viewportBottom);
+      let totalWords = 0;
+      
+      for (const node of textNodes) {
+        const text = node.textContent || '';
+        const words = text.trim().split(/\s+/).filter(w => w.length > 0);
+        totalWords += words.length;
+      }
+      
+      this.cachedDensity = totalWords;
+      this.lastAnalysisTime = now;
+      return totalWords;
+    }
+
+    private getVisibleTextNodes(viewportTop: number, viewportBottom: number): Node[] {
+      const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT,
+        {
+          acceptNode: (node) => {
+            if (!node.textContent?.trim()) return NodeFilter.FILTER_REJECT;
+            const parent = node.parentElement;
+            if (!parent) return NodeFilter.FILTER_REJECT;
+            const style = window.getComputedStyle(parent);
+            if (style.display === 'none' || style.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
+            const rect = parent.getBoundingClientRect();
+            const elementTop = rect.top + window.scrollY;
+            const elementBottom = elementTop + rect.height;
+            if (elementBottom < viewportTop || elementTop > viewportBottom) return NodeFilter.FILTER_REJECT;
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+      );
+      
+      const nodes: Node[] = [];
+      while (walker.nextNode()) {
+        nodes.push(walker.currentNode);
+      }
+      return nodes;
+    }
+  }
+
+  const EMPTY_STATS: ReadingStats = { totalSeconds: 0, totalWords: 0, sessions: 0 };
+
+  class ReadingStatsTracker {
+    private static readonly STORAGE_KEY = 'autoscroll_reading_stats';
+    private sessionStartTime: number = 0;
+    private sessionWordsRead: number = 0;
+    private lastScrollPosition: number = 0;
+    private stats: Record<string, ReadingStats> = {};
+    private readonly storageAvailable: boolean;
+
+    constructor(storageAvailable: boolean) {
+      this.storageAvailable = storageAvailable;
+    }
+
+    async load(): Promise<void> {
+      if (!this.storageAvailable) return;
+      try {
+        const result = await chrome.storage.local.get(ReadingStatsTracker.STORAGE_KEY);
+        this.stats = result[ReadingStatsTracker.STORAGE_KEY] ?? {};
+      } catch (error) {
+        handleChromeError('loading reading stats', error);
+        this.stats = {};
+      }
+    }
+
+    startSession(): void {
+      this.sessionStartTime = Date.now();
+      this.sessionWordsRead = 0;
+      this.lastScrollPosition = window.scrollY || document.documentElement.scrollTop;
+    }
+
+    trackProgress(currentDensity: number): void {
+      const currentScroll = window.scrollY || document.documentElement.scrollTop;
+      const scrollDelta = Math.abs(currentScroll - this.lastScrollPosition);
+      if (scrollDelta > 50) {
+        this.sessionWordsRead += Math.round(currentDensity * (scrollDelta / window.innerHeight));
+        this.lastScrollPosition = currentScroll;
+      }
+    }
+
+    async saveSession(): Promise<void> {
+      if (this.sessionStartTime === 0) return;
+
+      try {
+        const duration = Math.round((Date.now() - this.sessionStartTime) / 1000);
+        const today = new Date().toISOString().split('T')[0];
+
+        if (!this.stats[today]) {
+          this.stats[today] = { ...EMPTY_STATS };
+        }
+
+        this.stats[today].totalSeconds += duration;
+        this.stats[today].totalWords += this.sessionWordsRead;
+        this.stats[today].sessions += 1;
+
+        const last7Days = Object.keys(this.stats).sort().slice(-7);
+        const trimmedStats: Record<string, ReadingStats> = {};
+        for (const key of last7Days) {
+          trimmedStats[key] = this.stats[key];
+        }
+        this.stats = trimmedStats;
+
+        if (this.storageAvailable) {
+          await chrome.storage.local.set({ [ReadingStatsTracker.STORAGE_KEY]: trimmedStats });
+        }
+      } catch (error) {
+        handleChromeError('saving reading stats', error);
+      }
+    }
+
+    getTodayStats(): ReadingStats {
+      const today = new Date().toISOString().split('T')[0];
+      return this.stats[today] || { ...EMPTY_STATS };
+    }
+
+    getSessionDuration(): number {
+      if (this.sessionStartTime === 0) return 0;
+      return Math.round((Date.now() - this.sessionStartTime) / 1000);
+    }
+  }
 
   // Error handling constants
   const ERROR_MESSAGES = {
@@ -25,7 +165,11 @@ import { DEFAULT_SETTINGS } from './types';
   };
 
   class AutoScrollController {
-    private settings: ReaderSettings = DEFAULT_SETTINGS;
+    private settings: ReaderSettings = { ...DEFAULT_SETTINGS };
+    private globalSettings: ReaderSettings = { ...DEFAULT_SETTINGS };
+    private siteSettingsMap: SiteSettingsMap = {};
+    private siteModeHosts: string[] = [];
+    private readonly host = window.location.hostname;
     private focusLine: HTMLElement | null = null;
     private progressBar: HTMLElement | null = null;
     private animationFrameId: number | null = null;
@@ -38,8 +182,11 @@ import { DEFAULT_SETTINGS } from './types';
     private subpixelRemainder = 0;
     private isReadingMode = false;
     private readingModeStyleEl: HTMLStyleElement | null = null;
+    private readingModeCleanup: (() => void) | null = null;
     private isPausedByUser = false;
     private pauseTimeoutId: number | null = null;
+    private textDensityAnalyzer: TextDensityAnalyzer | null = null;
+    private readingStatsTracker: ReadingStatsTracker | null = null;
 
     constructor() {
       this.storageAvailable = !!(typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local);
@@ -65,7 +212,7 @@ import { DEFAULT_SETTINGS } from './types';
             this.updateSettings({ scrollSpeed: next });
             this.showSpeedToast(next);
             if (this.storageAvailable) {
-              chrome.storage.local.set({ readerSettings: { ...this.settings, scrollSpeed: next } });
+              this.persistSettings({ scrollSpeed: next });
             }
           } catch (error) {
             handleChromeError('handling speed hotkeys', error);
@@ -136,8 +283,12 @@ import { DEFAULT_SETTINGS } from './types';
       this.setupStorageListener();
       this.setupSpeedHotkeys();
       this.setupUserScrollPause();
+      
+      this.textDensityAnalyzer = new TextDensityAnalyzer();
+      this.readingStatsTracker = new ReadingStatsTracker(this.storageAvailable);
+      await this.readingStatsTracker.load();
 
-      if (this.settings.isScrolling) {
+      if (this.settings.autoStartOnLoad) {
         this.startScrolling();
       }
     }
@@ -151,13 +302,19 @@ import { DEFAULT_SETTINGS } from './types';
         }
 
         try {
-          chrome.storage.local.get('readerSettings', (result) => {
+          chrome.storage.local.get(['readerSettings', SITE_SETTINGS_KEY, SITE_MODE_KEY], (result) => {
             try {
               if (chrome.runtime.lastError) {
                 handleChromeError('loading settings', chrome.runtime.lastError);
                 showUserError(ERROR_MESSAGES.STORAGE_LOAD_FAILED);
-              } else if (result.readerSettings) {
-                this.settings = { ...this.settings, ...result.readerSettings };
+              } else {
+                if (result.readerSettings) {
+                  // isScrolling is runtime state: a persisted value must not auto-start a page.
+                  this.globalSettings = { ...this.globalSettings, ...result.readerSettings, isScrolling: false };
+                }
+                this.siteSettingsMap = result[SITE_SETTINGS_KEY] ?? {};
+                this.siteModeHosts = result[SITE_MODE_KEY] ?? [];
+                this.settings = this.computeEffective();
               }
               resolve();
             } catch (error) {
@@ -172,6 +329,34 @@ import { DEFAULT_SETTINGS } from './types';
           resolve(); // Still resolve to not break initialization
         }
       });
+    }
+
+    private isPerSiteModeOn(): boolean {
+      return this.siteModeHosts.includes(this.host);
+    }
+
+    private computeEffective(): ReaderSettings {
+      const override = this.isPerSiteModeOn() ? this.siteSettingsMap[this.host] : undefined;
+      return resolveSettings(this.globalSettings, override);
+    }
+
+    /** Writes a settings patch to the per-site override or the global settings. */
+    private persistSettings(patch: Partial<ReaderSettings>): void {
+      try {
+        if (this.isPerSiteModeOn()) {
+          const nextMap: SiteSettingsMap = {
+            ...this.siteSettingsMap,
+            [this.host]: { ...(this.siteSettingsMap[this.host] ?? {}), ...patch },
+          };
+          this.siteSettingsMap = nextMap;
+          chrome.storage.local.set({ [SITE_SETTINGS_KEY]: nextMap });
+        } else {
+          this.globalSettings = { ...this.globalSettings, ...patch, isScrolling: false };
+          chrome.storage.local.set({ readerSettings: { ...this.globalSettings } });
+        }
+      } catch (error) {
+        handleChromeError('persisting settings', error);
+      }
     }
     
     private enableReadingMode(): void {
@@ -281,7 +466,9 @@ import { DEFAULT_SETTINGS } from './types';
         const cleanup = () => {
           window.removeEventListener('scroll', scrollHandler, true);
           try { mo.disconnect(); } catch { /* noop */ }
+          this.readingModeCleanup = null;
         };
+        this.readingModeCleanup = cleanup;
 
         window.addEventListener('scroll', scrollHandler, true);
         try { mo.observe(document.documentElement, { childList: true, subtree: true, attributes: false }); } catch { /* noop */ }
@@ -296,6 +483,7 @@ import { DEFAULT_SETTINGS } from './types';
 
     private disableReadingMode(): void {
       try {
+        this.readingModeCleanup?.();
         document.documentElement.removeAttribute('data-autoscroll-reading-mode');
         if (this.readingModeStyleEl) {
           this.readingModeStyleEl.remove();
@@ -335,6 +523,18 @@ import { DEFAULT_SETTINGS } from './types';
                    this.toggleReadingMode();
                    sendResponse({ readingMode: this.isReadingMode });
                    break;
+                case 'TOGGLE_SMART_SPEED':
+                   this.updateSettings({ smartSpeedEnabled: !this.settings.smartSpeedEnabled });
+                   if (this.storageAvailable) {
+                     this.persistSettings({ smartSpeedEnabled: !!this.settings.smartSpeedEnabled });
+                   }
+                   sendResponse({ smartSpeedEnabled: !!this.settings.smartSpeedEnabled });
+                   break;
+                case 'GET_READING_STATS':
+                   const stats = this.readingStatsTracker?.getTodayStats() || { totalSeconds: 0, totalWords: 0, sessions: 0 };
+                   const sessionDuration = this.readingStatsTracker?.getSessionDuration() || 0;
+                   sendResponse({ ...stats, sessionDuration, smartSpeedEnabled: !!this.settings.smartSpeedEnabled });
+                   break;
                 default:
                   console.warn('AutoScroll Reader: Unknown message type received:', message.type);
                   sendResponse({ error: 'Unknown message type' });
@@ -355,70 +555,47 @@ import { DEFAULT_SETTINGS } from './types';
 
     private setupStorageListener(): void {
       try {
-        if (this.storageAvailable && chrome.storage.onChanged) {
-          chrome.storage.onChanged.addListener((changes, namespace) => {
-            try {
-              if (namespace === 'local' && changes.readerSettings) {
-                if (this.isToggling) {
-                  return;
-                }
-                const newSettings = changes.readerSettings.newValue as ReaderSettings;
-
-                // Check what type of settings changed
-                const oldSettings = { ...this.settings };
-                const isScrollingChanged = oldSettings.isScrolling !== newSettings.isScrolling;
-                const focusLineSettingsChanged =
-                  oldSettings.lineColor !== newSettings.lineColor ||
-                  oldSettings.lineThickness !== newSettings.lineThickness ||
-                  oldSettings.lineOpacity !== newSettings.lineOpacity ||
-                  oldSettings.scrollSpeed !== newSettings.scrollSpeed;
-
-                // Handle scrolling state changes
-                if (isScrollingChanged) {
-                  this.settings.isScrolling = newSettings.isScrolling;
-
-                  if (this.focusLine) {
-                    this.focusLine.style.visibility = this.settings.isScrolling ? 'visible' : 'hidden';
-                  }
-
-                  if (this.settings.isScrolling) {
-                    this.startScrolling();
-                  }
-                  else {
-                    this.stopScrolling();
-                  }
-                }
-
-                // Handle focus line style changes
-                if (focusLineSettingsChanged) {
-                  if (!isScrollingChanged) {
-                    this.settings = { ...this.settings, ...newSettings };
-                  } else {
-                    // Only update non-scrolling settings
-                    this.settings = {
-                      ...this.settings,
-                      lineColor: newSettings.lineColor,
-                      lineThickness: newSettings.lineThickness,
-                      lineOpacity: newSettings.lineOpacity,
-                      scrollSpeed: newSettings.scrollSpeed
-                    };
-                  }
-                  // Recreate focus line to apply new styles
-                  this.createFocusLine();
-                  // Restore visibility based on scrolling state
-                  if (this.focusLine) {
-                    this.focusLine.style.visibility = this.settings.isScrolling ? 'visible' : 'hidden';
-                  }
-                }
-              }
-            } catch (error) {
-              handleChromeError('processing storage changes', error);
-              showUserError(ERROR_MESSAGES.STORAGE_LOAD_FAILED);
-            }
-          });
-        } else {
+        if (!this.storageAvailable || !chrome.storage.onChanged) {
           console.warn('AutoScroll Reader: chrome.storage.onChanged not available');
+          return;
         }
+
+        chrome.storage.onChanged.addListener((changes, namespace) => {
+          try {
+            if (namespace !== 'local') return;
+            const settingsChanged = !!changes.readerSettings;
+            const siteChanged = !!changes[SITE_SETTINGS_KEY];
+            const modeChanged = !!changes[SITE_MODE_KEY];
+            if (!settingsChanged && !siteChanged && !modeChanged) return;
+
+            if (settingsChanged) {
+              const newGlobal = changes.readerSettings.newValue as ReaderSettings | undefined;
+              if (newGlobal) {
+                this.globalSettings = { ...this.globalSettings, ...newGlobal, isScrolling: false };
+              }
+            }
+            if (siteChanged) {
+              this.siteSettingsMap = (changes[SITE_SETTINGS_KEY].newValue as SiteSettingsMap) ?? {};
+            }
+            if (modeChanged) {
+              this.siteModeHosts = (changes[SITE_MODE_KEY].newValue as string[]) ?? [];
+            }
+
+            // Ignore the echo of our own persistence writes
+            if (this.isToggling) return;
+
+            const wasScrolling = this.settings.isScrolling;
+            this.settings = this.computeEffective();
+            this.settings.isScrolling = wasScrolling;
+            this.applyFocusLineStyle();
+            if (this.focusLine) {
+              this.focusLine.style.visibility = wasScrolling ? 'visible' : 'hidden';
+            }
+          } catch (error) {
+            handleChromeError('processing storage changes', error);
+            showUserError(ERROR_MESSAGES.STORAGE_LOAD_FAILED);
+          }
+        });
       } catch (error) {
         handleChromeError('setting up storage listener', error);
         showUserError(ERROR_MESSAGES.STORAGE_LOAD_FAILED);
@@ -511,13 +688,30 @@ import { DEFAULT_SETTINGS } from './types';
       }
     }
 
+    private calculateSmartSpeed(): number {
+      if (!this.settings.smartSpeedEnabled || !this.textDensityAnalyzer) {
+        return this.settings.scrollSpeed;
+      }
+      
+      const density = this.textDensityAnalyzer.analyze();
+      const wordsPerViewport = density;
+      
+      if (wordsPerViewport < 50) return Math.max(1, this.settings.scrollSpeed - 2);
+      if (wordsPerViewport < 100) return Math.max(2, this.settings.scrollSpeed - 1);
+      if (wordsPerViewport > 300) return Math.min(10, this.settings.scrollSpeed + 1);
+      if (wordsPerViewport > 500) return Math.min(10, this.settings.scrollSpeed + 2);
+      
+      return this.settings.scrollSpeed;
+    }
+
     private scrollStep = (timestamp: number): void => {
       if (!this.settings.isScrolling || this.isPausedByUser) return;
 
       const dt = this.lastTimestamp === null ? (1 / 60) : Math.max(0, (timestamp - this.lastTimestamp) / 1000);
       this.lastTimestamp = timestamp;
 
-      const pps = this.BASE_SPEED_PPS * this.settings.scrollSpeed;
+      const effectiveSpeed = this.calculateSmartSpeed();
+      const pps = this.BASE_SPEED_PPS * effectiveSpeed;
       if (pps === 0) {
         this.animationFrameId = requestAnimationFrame(this.scrollStep);
         return;
@@ -536,6 +730,11 @@ import { DEFAULT_SETTINGS } from './types';
         const nextTop = Math.max(0, Math.min(scroller.scrollTop + intDelta, maxScrollTop));
         scroller.scrollTop = nextTop;
         this.updateProgress();
+        
+        if (this.readingStatsTracker && this.textDensityAnalyzer) {
+          const density = this.textDensityAnalyzer.analyze();
+          this.readingStatsTracker.trackProgress(density);
+        }
       }
 
       const atBoundary = this.settings.scrollDirection === 'down'
@@ -544,9 +743,10 @@ import { DEFAULT_SETTINGS } from './types';
 
       if (atBoundary) {
         this.stopScrolling();
+        this.globalSettings.isScrolling = false;
         if (this.storageAvailable) {
           chrome.storage.local.set({
-            readerSettings: { ...this.settings, isScrolling: false }
+            readerSettings: { ...this.globalSettings, isScrolling: false }
           });
         }
       } else {
@@ -565,6 +765,10 @@ import { DEFAULT_SETTINGS } from './types';
         this.updateProgress();
       }
       
+      if (this.readingStatsTracker) {
+        this.readingStatsTracker.startSession();
+      }
+      
       this.lastTimestamp = null;
       this.subpixelRemainder = 0;
       this.animationFrameId = requestAnimationFrame(this.scrollStep);
@@ -579,50 +783,52 @@ import { DEFAULT_SETTINGS } from './types';
         cancelAnimationFrame(this.animationFrameId);
         this.animationFrameId = null;
       }
+      
+      if (this.readingStatsTracker) {
+        void this.readingStatsTracker.saveSession();
+      }
+      
       this.lastTimestamp = null;
       this.subpixelRemainder = 0;
     }
 
     public toggleScrolling(): void {
       this.isToggling = true;
-      
+
       const newState = !this.settings.isScrolling;
-      
+
       if (newState) {
         this.startScrolling();
       } else {
         this.stopScrolling();
       }
-      
+
       this.settings.isScrolling = newState;
-      
-      if (this.storageAvailable) {
-        try {
-          chrome.storage.local.set({
-            readerSettings: { ...this.settings }
-          }).then(() => {
-            try {
-              setTimeout(() => {
-                this.isToggling = false;
-              }, this.TOGGLE_TIMEOUT);
-            } catch (error) {
-              handleChromeError('resetting toggle flag after storage save', error);
-              this.isToggling = false;
-            }
-          }).catch((error) => {
-            handleChromeError('saving settings to storage', error);
-            showUserError(ERROR_MESSAGES.STORAGE_SAVE_FAILED);
-            this.isToggling = false;
-          });
-        } catch (error) {
-          handleChromeError('storage set operation', error);
-          showUserError(ERROR_MESSAGES.STORAGE_SAVE_FAILED);
-          this.isToggling = false;
-        }
-      } else {
+      this.globalSettings.isScrolling = false;
+
+      if (!this.storageAvailable) {
         setTimeout(() => {
           this.isToggling = false;
         }, this.TOGGLE_TIMEOUT);
+        return;
+      }
+
+      try {
+        chrome.storage.local.set({
+          readerSettings: { ...this.globalSettings, isScrolling: false }
+        }).then(() => {
+          setTimeout(() => {
+            this.isToggling = false;
+          }, this.TOGGLE_TIMEOUT);
+        }).catch((error) => {
+          handleChromeError('saving settings to storage', error);
+          showUserError(ERROR_MESSAGES.STORAGE_SAVE_FAILED);
+          this.isToggling = false;
+        });
+      } catch (error) {
+        handleChromeError('storage set operation', error);
+        showUserError(ERROR_MESSAGES.STORAGE_SAVE_FAILED);
+        this.isToggling = false;
       }
     }
   }

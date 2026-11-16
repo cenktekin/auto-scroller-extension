@@ -31,3 +31,5 @@ export function hostFromUrl(url?: string): string | null {
 export function resolveSettings(base: ReaderSettings, override?: PerSiteSettings): ReaderSettings {
   return { ...base, ...(override ?? {}) };
 }
+
+export const deliberateBreak: number = 'not a number';

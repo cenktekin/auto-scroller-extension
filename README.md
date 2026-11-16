@@ -15,7 +15,7 @@ AutoScroll Reader adds smooth auto-scrolling with a subtle focus line for comfor
 - Smart Speed: adapts the scroll speed to the text density of the page
 - Per-site settings: override speed, focus line and auto-start for one site only
 - Auto-start on load, for the sites where you enable it
-- Reading stats for today: time, words and sessions
+- Reading stats: today's time, words and sessions, plus a last-7-days history in the popup
 - Reading Mode: cleans up page layout for distraction-free reading
 - Internal PDF Viewer powered by `pdfjs-dist`
 - Settings persist via Chrome storage and sync across signed-in Chrome profiles
@@ -85,10 +85,12 @@ The built files are in `dist/`.
 ## Development
 
 - Popup (React + Vite): `index.html`, `index.tsx`, `App.tsx`
-- Content script: `content.ts`
+- Content script: `content.ts` (entry point; logic lives in `settings-store.ts`,
+  `scroll-controller.ts`, `reading-mode.ts`, `reading-stats.ts`, `density-analyzer.ts`,
+  `overlay.ts`)
 - Background service worker: `background.ts`
 - Internal PDF viewer: `pdf-viewer.html`, `pdf-viewer.ts`
-- Types/Helpers: `types.ts`, `utils.ts`, `hooks/`, `components/`
+- Types/Helpers: `types.ts`, `utils.ts`, `errors.ts`, `hooks/`, `components/`
 
 Build:
 ```bash

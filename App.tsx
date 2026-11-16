@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import type { ReaderSettings, ChromeMessage, ReadingStats } from './types';
+import type { ReaderSettings, ChromeMessage, ReadingStatsResponse } from './types';
 import { useReaderSettings } from './hooks/useChromeStorage';
 import { useSiteSettings } from './hooks/useSiteSettings';
 import { Slider } from './components/Slider';
 import { ColorButton } from './components/ColorButton';
 import { ToggleButton } from './components/ToggleButton';
+import { RecentReading } from './components/RecentReading';
 import { isInjectableUrl, hostFromUrl } from './utils';
 
 const NEON_COLORS = ['#00ffff', '#39ff14', '#ff00ff', '#ff3366', '#fdda0d'];
@@ -17,11 +18,13 @@ const App: React.FC = () => {
   const [isContentScriptActive, setIsContentScriptActive] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
   const [smartSpeedEnabled, setSmartSpeedEnabled] = useState(false);
-  const [readingStats, setReadingStats] = useState<ReadingStats & { sessionDuration: number }>({
+  const [readingStats, setReadingStats] = useState<ReadingStatsResponse>({
     totalSeconds: 0,
     totalWords: 0,
     sessions: 0,
-    sessionDuration: 0
+    sessionDuration: 0,
+    smartSpeedEnabled: false,
+    recentDays: []
   });
 
   const isChromeApiAvailable = typeof chrome !== 'undefined' && chrome.tabs && chrome.scripting && chrome.runtime;
@@ -338,6 +341,8 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+
+        <RecentReading days={readingStats.recentDays ?? []} />
 
         <div className="flex items-center justify-between">
           <a

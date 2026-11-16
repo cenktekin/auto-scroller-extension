@@ -1,0 +1,49 @@
+{
+  "name": "autoscroll-reader",
+  "version": "1.0.0",
+  "manifestVersion": 3,
+  "status": "active",
+  "updatedAt": "2026-11-17",
+  "stack": {
+    "language": "TypeScript",
+    "ui": "React 18",
+    "bundler": "Vite 5",
+    "tests": "node:test"
+  },
+  "gates": {
+    "typecheck": "pass",
+    "tests": { "command": "npm test", "passed": 6, "failed": 0 },
+    "build": "pass"
+  },
+  "bundles": {
+    "popup": { "file": "popup.js", "format": "esm" },
+    "content": { "file": "content.js", "format": "iife" },
+    "background": { "file": "background.js", "format": "iife" },
+    "pdfViewer": { "file": "pdfviewer.js", "format": "esm" }
+  },
+  "features": [
+    "auto-scroll",
+    "focus-line",
+    "per-site-settings",
+    "auto-start-on-load",
+    "reading-mode",
+    "smart-speed",
+    "reading-stats",
+    "seven-day-history",
+    "pdf-viewer"
+  ],
+  "permissions": {
+    "api": ["storage", "activeTab", "scripting", "contextMenus"],
+    "host": ["<all_urls>"]
+  },
+  "network": {
+    "outboundRequests": 0,
+    "telemetry": false
+  },
+  "knownGaps": [
+    "no behaviour tests for content-script logic",
+    "host permissions are broad but inherent to the product",
+    "cloud sync toggle has no UI",
+    "chromium-only"
+  ]
+}

@@ -40,6 +40,19 @@ export interface ReadingStats {
   sessions: number;
 }
 
+/** One day of stored reading stats; `date` is a local YYYY-MM-DD key. */
+export interface DailyStatsEntry {
+  date: string;
+  stats: ReadingStats;
+}
+
+/** Response payload of GET_READING_STATS. */
+export interface ReadingStatsResponse extends ReadingStats {
+  sessionDuration: number;
+  smartSpeedEnabled: boolean;
+  recentDays?: DailyStatsEntry[];
+}
+
 export interface ChromeMessage {
   type: 'TOGGLE_SCROLL' | 'UPDATE_SETTINGS' | 'GET_STATUS' | 'TOGGLE_READING_MODE' | 'TOGGLE_SMART_SPEED' | 'GET_READING_STATS';
   payload?: Partial<ReaderSettings>;
